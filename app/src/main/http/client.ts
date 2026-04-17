@@ -41,7 +41,7 @@ function buildMultipartBody(
 
 function makeRequest(
   parsedUrl: URL,
-  options: http.RequestOptions,
+  options: https.RequestOptions,
   requestBody: Buffer | string | null,
   timeoutMs: number
 ): Promise<{ status: number; statusText: string; headers: http.IncomingHttpHeaders; body: string; size: number }> {
@@ -122,7 +122,7 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
     while (true) {
       const parsedUrl = new URL(currentUrl)
 
-      const options: http.RequestOptions = {
+      const options: https.RequestOptions = {
         method: params.method,
         headers,
         rejectUnauthorized: params.validateSSL

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -116,7 +117,7 @@ export async function loadProject(
 async function scanCollectionsDir(dirPath: string): Promise<ProjectTreeNode[]> {
   const nodes: ProjectTreeNode[] = []
 
-  let entries: Awaited<ReturnType<typeof fs.readdir>>
+  let entries: Dirent[]
   try {
     entries = await fs.readdir(dirPath, { withFileTypes: true })
   } catch {
@@ -379,7 +380,7 @@ export async function listEnvironments(projectPath: string): Promise<Environment
   const envDir = path.join(projectPath, 'environments')
   const environments: Environment[] = []
 
-  let entries: Awaited<ReturnType<typeof fs.readdir>>
+  let entries: Dirent[]
   try {
     entries = await fs.readdir(envDir, { withFileTypes: true })
   } catch {
@@ -509,7 +510,7 @@ export async function listProjects(
 ): Promise<{ name: string; path: string }[]> {
   const projects: { name: string; path: string }[] = []
 
-  let entries: Awaited<ReturnType<typeof fs.readdir>>
+  let entries: Dirent[]
   try {
     entries = await fs.readdir(workspacePath, { withFileTypes: true })
   } catch {
@@ -547,7 +548,7 @@ export async function listAllCollections(
 
   for (const project of projects) {
     const collectionsDir = path.join(project.path, 'collections')
-    let entries: Awaited<ReturnType<typeof fs.readdir>>
+    let entries: Dirent[]
     try {
       entries = await fs.readdir(collectionsDir, { withFileTypes: true })
     } catch {

@@ -23,5 +23,5 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  ;(window as Record<string, unknown>).electronAPI = api
+  ;(globalThis as Record<string, unknown>).electronAPI = api
 }
