@@ -13,7 +13,9 @@ import WorkspaceSelector from '@renderer/components/WorkspaceSelector'
 import GitStatusBar from '@renderer/components/GitStatusBar'
 import GitPanel from '@renderer/components/GitPanel'
 import UpdatePrompt from '@renderer/components/UpdatePrompt'
+import ConfirmDialog from '@renderer/components/ConfirmDialog'
 import { ipc } from '@renderer/lib/ipc'
+import { confirm } from '@renderer/lib/confirm'
 
 function App(): JSX.Element {
   const {
@@ -42,7 +44,8 @@ function App(): JSX.Element {
     setShowEnvironmentManager,
     setShowImportDialog,
     setShowNewProjectDialog,
-    checkGitStatus
+    checkGitStatus,
+    deleteProject
   } = useAppStore()
 
   useEffect(() => {
@@ -136,7 +139,7 @@ function App(): JSX.Element {
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="min-w-[200px] rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl"
+              className="min-w-[200px] max-h-[70vh] overflow-y-auto rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl"
               sideOffset={4}
             >
               {projects.map((proj) => (
@@ -155,6 +158,34 @@ function App(): JSX.Element {
               >
                 + New Project
               </DropdownMenu.Item>
+              {projects.length > 0 && (
+                <DropdownMenu.Sub>
+                  <DropdownMenu.SubTrigger className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-zinc-500 outline-none hover:bg-zinc-700 hover:text-zinc-400">
+                    Delete Project...
+                  </DropdownMenu.SubTrigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.SubContent className="min-w-[220px] max-h-[70vh] overflow-y-auto rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl">
+                      {projects.map((proj) => (
+                        <DropdownMenu.Item
+                          key={proj.path}
+                          className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-red-400 outline-none hover:bg-zinc-700"
+                          onSelect={async () => {
+                            const ok = await confirm({
+                              title: 'Delete project?',
+                              message: `"${proj.name}" and all its collections, requests, environments, and history will be permanently deleted from disk.\n\nThis cannot be undone.`,
+                              confirmLabel: 'Delete',
+                              destructive: true
+                            })
+                            if (ok) await deleteProject(proj.path)
+                          }}
+                        >
+                          {proj.name}
+                        </DropdownMenu.Item>
+                      ))}
+                    </DropdownMenu.SubContent>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Sub>
+              )}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -177,7 +208,7 @@ function App(): JSX.Element {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content
-                className="min-w-[180px] rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl"
+                className="min-w-[180px] max-h-[70vh] overflow-y-auto rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl"
                 sideOffset={4}
               >
                 <DropdownMenu.Item
@@ -353,6 +384,9 @@ function App(): JSX.Element {
 
       {/* Auto-update prompt */}
       <UpdatePrompt />
+
+      {/* Confirmation dialog (shared across the app) */}
+      <ConfirmDialog />
     </div>
   )
 }

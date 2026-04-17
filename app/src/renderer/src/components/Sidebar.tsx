@@ -1,8 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useAppStore } from '@renderer/stores/app-store'
 import { ipc } from '@renderer/lib/ipc'
+import { confirm } from '@renderer/lib/confirm'
 import type { ProjectTreeNode, HttpMethod, RequestDefinition } from '@shared/types/project'
+import MoveToDialog from './MoveToDialog'
 
 const METHOD_COLORS: Record<HttpMethod, string> = {
   GET: 'bg-green-500/20 text-green-400',
@@ -12,6 +14,16 @@ const METHOD_COLORS: Record<HttpMethod, string> = {
   DELETE: 'bg-red-500/20 text-red-400',
   HEAD: 'bg-zinc-500/20 text-zinc-400',
   OPTIONS: 'bg-zinc-500/20 text-zinc-400'
+}
+
+function flattenTree(nodes: ProjectTreeNode[]): ProjectTreeNode[] {
+  const result: ProjectTreeNode[] = []
+  const visit = (n: ProjectTreeNode): void => {
+    result.push(n)
+    if (n.children) for (const c of n.children) visit(c)
+  }
+  nodes.forEach(visit)
+  return result
 }
 
 export default function Sidebar(): JSX.Element {
@@ -24,10 +36,16 @@ export default function Sidebar(): JSX.Element {
     createRequest,
     deleteRequest,
     deleteCollection,
+    deleteNodes,
     toggleHistory
   } = useAppStore()
 
   const [filter, setFilter] = useState('')
+  const [selection, setSelection] = useState<Set<string>>(new Set())
+  const [anchorPath, setAnchorPath] = useState<string | null>(null)
+  const [moveDialogSource, setMoveDialogSource] = useState<string[] | null>(null)
+
+  // Creation state
   const [newCollectionName, setNewCollectionName] = useState('')
   const [showNewCollection, setShowNewCollection] = useState(false)
   const [newCollectionParent, setNewCollectionParent] = useState<string | undefined>()
@@ -44,14 +62,8 @@ export default function Sidebar(): JSX.Element {
           if (node.type === 'request') {
             return node.name.toLowerCase().includes(lower) ? node : null
           }
-          // For collections, filter children and include if any children match
-          const filteredChildren = node.children
-            ? filterTree(node.children)
-            : []
-          if (
-            filteredChildren.length > 0 ||
-            node.name.toLowerCase().includes(lower)
-          ) {
+          const filteredChildren = node.children ? filterTree(node.children) : []
+          if (filteredChildren.length > 0 || node.name.toLowerCase().includes(lower)) {
             return { ...node, children: filteredChildren }
           }
           return null
@@ -59,6 +71,40 @@ export default function Sidebar(): JSX.Element {
         .filter(Boolean) as ProjectTreeNode[]
     },
     [filter]
+  )
+
+  const filtered = useMemo(() => filterTree(projectTree), [filterTree, projectTree])
+  const flatFiltered = useMemo(() => flattenTree(filtered), [filtered])
+
+  const clearSelection = useCallback(() => {
+    setSelection(new Set())
+    setAnchorPath(null)
+  }, [])
+
+  const handleNodeClick = useCallback(
+    (node: ProjectTreeNode, e: React.MouseEvent) => {
+      if (e.shiftKey && anchorPath) {
+        const i = flatFiltered.findIndex((n) => n.path === anchorPath)
+        const j = flatFiltered.findIndex((n) => n.path === node.path)
+        if (i >= 0 && j >= 0) {
+          const [from, to] = i < j ? [i, j] : [j, i]
+          setSelection(new Set(flatFiltered.slice(from, to + 1).map((n) => n.path)))
+        }
+        return
+      }
+      if (e.ctrlKey || e.metaKey) {
+        const next = new Set(selection)
+        if (next.has(node.path)) next.delete(node.path)
+        else next.add(node.path)
+        setSelection(next)
+        setAnchorPath(node.path)
+        return
+      }
+      setSelection(new Set([node.path]))
+      setAnchorPath(node.path)
+      if (node.type === 'request') openRequest(node.path)
+    },
+    [anchorPath, flatFiltered, selection, openRequest]
   )
 
   const handleCreateCollection = useCallback(async () => {
@@ -77,7 +123,23 @@ export default function Sidebar(): JSX.Element {
     setNewRequestParent('')
   }, [newRequestName, newRequestParent, createRequest])
 
-  const filtered = filterTree(projectTree)
+  const handleDeleteSelection = useCallback(async () => {
+    const paths = Array.from(selection)
+    if (paths.length === 0) return
+    const ok = await confirm({
+      title: `Delete ${paths.length} item${paths.length === 1 ? '' : 's'}?`,
+      message: `${paths.length} selected item${paths.length === 1 ? '' : 's'} will be permanently deleted from disk. For collections, all their nested requests and sub-collections go too.`,
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
+    await deleteNodes(paths)
+    clearSelection()
+  }, [selection, deleteNodes, clearSelection])
+
+  const handleMoveSelection = useCallback(() => {
+    setMoveDialogSource(Array.from(selection))
+  }, [selection])
 
   return (
     <div className="flex h-full flex-col bg-zinc-900">
@@ -119,6 +181,36 @@ export default function Sidebar(): JSX.Element {
           Collection
         </button>
       </div>
+
+      {/* Selection action bar */}
+      {selection.size > 0 && (
+        <div className="flex items-center gap-1 border-b border-zinc-800 bg-zinc-800/50 px-2 py-1">
+          <span className="flex-1 text-[11px] text-zinc-400">
+            {selection.size} selected
+          </span>
+          <button
+            onClick={handleMoveSelection}
+            className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700"
+            title="Move to..."
+          >
+            Move
+          </button>
+          <button
+            onClick={handleDeleteSelection}
+            className="rounded px-2 py-0.5 text-[11px] text-red-400 hover:bg-zinc-700"
+            title="Delete selected"
+          >
+            Delete
+          </button>
+          <button
+            onClick={clearSelection}
+            className="rounded px-2 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-700"
+            title="Clear selection"
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Inline new collection form */}
       {showNewCollection && !newCollectionParent && (
@@ -186,7 +278,13 @@ export default function Sidebar(): JSX.Element {
       )}
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto px-1 py-1">
+      <div
+        className="flex-1 overflow-y-auto px-1 py-1"
+        onClick={(e) => {
+          // Clicks on empty tree area clear selection
+          if (e.target === e.currentTarget) clearSelection()
+        }}
+      >
         {filtered.length === 0 ? (
           <div className="px-2 py-4 text-center text-xs text-zinc-600">
             {filter ? 'No matching requests' : 'No collections yet'}
@@ -198,7 +296,8 @@ export default function Sidebar(): JSX.Element {
               node={node}
               depth={0}
               activeRequestPath={activeRequestPath}
-              onOpenRequest={openRequest}
+              selection={selection}
+              onNodeClick={handleNodeClick}
               onNewRequest={(collPath) => {
                 setNewRequestParent(collPath)
                 setShowNewRequest(true)
@@ -209,6 +308,7 @@ export default function Sidebar(): JSX.Element {
               }}
               onDeleteRequest={deleteRequest}
               onDeleteCollection={deleteCollection}
+              onMoveRequest={(path) => setMoveDialogSource([path])}
             />
           ))
         )}
@@ -230,6 +330,16 @@ export default function Sidebar(): JSX.Element {
           History
         </button>
       </div>
+
+      {moveDialogSource && (
+        <MoveToDialog
+          sourcePaths={moveDialogSource}
+          onClose={() => {
+            setMoveDialogSource(null)
+            clearSelection()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -238,24 +348,29 @@ function TreeNode({
   node,
   depth,
   activeRequestPath,
-  onOpenRequest,
+  selection,
+  onNodeClick,
   onNewRequest,
   onNewSubCollection,
   onDeleteRequest,
-  onDeleteCollection
+  onDeleteCollection,
+  onMoveRequest
 }: {
   node: ProjectTreeNode
   depth: number
   activeRequestPath: string | null
-  onOpenRequest: (path: string) => void
+  selection: Set<string>
+  onNodeClick: (node: ProjectTreeNode, e: React.MouseEvent) => void
   onNewRequest: (collectionPath: string) => void
   onNewSubCollection: (parentPath: string) => void
   onDeleteRequest: (path: string) => void
   onDeleteCollection: (path: string) => void
+  onMoveRequest: (path: string) => void
 }): JSX.Element {
   const [expanded, setExpanded] = useState(true)
   const isCollection = node.type === 'collection' || node.type === 'folder'
   const isActive = node.path === activeRequestPath
+  const isSelected = selection.has(node.path)
 
   if (isCollection) {
     return (
@@ -263,8 +378,18 @@ function TreeNode({
         <ContextMenu.Trigger asChild>
           <div>
             <button
-              onClick={() => setExpanded(!expanded)}
-              className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+              onClick={(e) => {
+                // Let ctrl/shift/meta clicks select without toggling expansion
+                if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                  onNodeClick(node, e)
+                } else {
+                  setExpanded(!expanded)
+                  onNodeClick(node, e)
+                }
+              }}
+              className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs text-zinc-300 ${
+                isSelected ? 'bg-blue-500/20 text-zinc-100' : 'hover:bg-zinc-800'
+              }`}
               style={{ paddingLeft: depth * 12 + 4 }}
             >
               <svg
@@ -291,11 +416,13 @@ function TreeNode({
                       node={child}
                       depth={depth + 1}
                       activeRequestPath={activeRequestPath}
-                      onOpenRequest={onOpenRequest}
+                      selection={selection}
+                      onNodeClick={onNodeClick}
                       onNewRequest={onNewRequest}
                       onNewSubCollection={onNewSubCollection}
                       onDeleteRequest={onDeleteRequest}
                       onDeleteCollection={onDeleteCollection}
+                      onMoveRequest={onMoveRequest}
                     />
                   ))}
               </div>
@@ -324,8 +451,23 @@ function TreeNode({
             </ContextMenu.Item>
             <ContextMenu.Separator className="my-1 h-px bg-zinc-700" />
             <ContextMenu.Item
+              className="flex cursor-pointer items-center rounded px-2 py-1.5 text-xs text-zinc-300 outline-none hover:bg-zinc-700"
+              onSelect={() => onMoveRequest(node.path)}
+            >
+              Move to...
+            </ContextMenu.Item>
+            <ContextMenu.Separator className="my-1 h-px bg-zinc-700" />
+            <ContextMenu.Item
               className="flex cursor-pointer items-center rounded px-2 py-1.5 text-xs text-red-400 outline-none hover:bg-zinc-700"
-              onSelect={() => onDeleteCollection(node.path)}
+              onSelect={async () => {
+                const ok = await confirm({
+                  title: 'Delete collection?',
+                  message: `"${node.name}" and all its requests and sub-collections will be permanently deleted from disk.`,
+                  confirmLabel: 'Delete',
+                  destructive: true
+                })
+                if (ok) onDeleteCollection(node.path)
+              }}
             >
               Delete Collection
             </ContextMenu.Item>
@@ -343,27 +485,40 @@ function TreeNode({
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <button
-          onClick={() => onOpenRequest(node.path)}
+          onClick={(e) => onNodeClick(node, e)}
           className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs transition-colors ${
-            isActive
-              ? 'bg-zinc-700/70 text-zinc-100'
-              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
+            isSelected
+              ? 'bg-blue-500/20 text-zinc-100'
+              : isActive
+                ? 'bg-zinc-700/70 text-zinc-100'
+                : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
           }`}
           style={{ paddingLeft: depth * 12 + 4 }}
         >
-          <span
-            className={`method-badge shrink-0 ${colorClass}`}
-          >
+          <span className={`method-badge shrink-0 ${colorClass}`}>
             {method.substring(0, 3)}
           </span>
           <span className="truncate">{node.name}</span>
         </button>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="min-w-[140px] rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl">
+        <ContextMenu.Content className="min-w-[160px] rounded-md border border-zinc-700 bg-zinc-800 p-1 shadow-xl">
+          <ContextMenu.Item
+            className="flex cursor-pointer items-center rounded px-2 py-1.5 text-xs text-zinc-300 outline-none hover:bg-zinc-700"
+            onSelect={() => onMoveRequest(node.path)}
+          >
+            Move to...
+          </ContextMenu.Item>
           <ContextMenu.Item
             className="flex cursor-pointer items-center rounded px-2 py-1.5 text-xs text-zinc-300 outline-none hover:bg-zinc-700"
             onSelect={async () => {
+              const ok = await confirm({
+                title: 'Clear history for this request?',
+                message: `All history entries for "${node.name}" will be permanently deleted.`,
+                confirmLabel: 'Clear',
+                destructive: true
+              })
+              if (!ok) return
               try {
                 const req = await ipc<RequestDefinition>('request:load', { requestPath: node.path })
                 await useAppStore.getState().clearHistoryForRequest(req.id)
@@ -375,7 +530,15 @@ function TreeNode({
           <ContextMenu.Separator className="my-1 h-px bg-zinc-700" />
           <ContextMenu.Item
             className="flex cursor-pointer items-center rounded px-2 py-1.5 text-xs text-red-400 outline-none hover:bg-zinc-700"
-            onSelect={() => onDeleteRequest(node.path)}
+            onSelect={async () => {
+              const ok = await confirm({
+                title: 'Delete request?',
+                message: `"${node.name}" will be permanently deleted from disk.`,
+                confirmLabel: 'Delete',
+                destructive: true
+              })
+              if (ok) onDeleteRequest(node.path)
+            }}
           >
             Delete Request
           </ContextMenu.Item>

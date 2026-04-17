@@ -3,6 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useAppStore } from '@renderer/stores/app-store'
 import { ipc } from '@renderer/lib/ipc'
+import { confirm } from '@renderer/lib/confirm'
 
 export default function WorkspaceSelector(): JSX.Element {
   const {
@@ -101,7 +102,15 @@ export default function WorkspaceSelector(): JSX.Element {
                         <DropdownMenu.Item
                           key={ws.path}
                           className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-red-400 outline-none hover:bg-zinc-700"
-                          onSelect={() => removeWorkspace(ws.path)}
+                          onSelect={async () => {
+                            const ok = await confirm({
+                              title: 'Remove workspace?',
+                              message: `"${ws.name}" will be removed from your workspace list. The folder on disk is not deleted.`,
+                              confirmLabel: 'Remove',
+                              destructive: true
+                            })
+                            if (ok) removeWorkspace(ws.path)
+                          }}
                         >
                           {ws.name}
                         </DropdownMenu.Item>

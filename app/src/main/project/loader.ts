@@ -187,6 +187,15 @@ async function scanCollectionsDir(dirPath: string): Promise<ProjectTreeNode[]> {
 
 // ── Project creation ─────────────────────────────────────────────────────────
 
+export async function deleteProject(projectPath: string): Promise<void> {
+  // Sanity check — only delete directories that actually look like a project.
+  const configPath = path.join(projectPath, 'kleanrest.project.json')
+  if (!(await exists(configPath))) {
+    throw new Error('Not a kleanREST project directory')
+  }
+  await fs.rm(projectPath, { recursive: true, force: true })
+}
+
 export async function createProject(
   parentPath: string,
   name: string
@@ -225,6 +234,166 @@ export async function createProject(
   await fs.writeFile(path.join(projectPath, '.gitignore'), gitignore, 'utf-8')
 
   return { projectPath, config }
+}
+
+// ── Move operations (requests & collections) ────────────────────────────────
+
+export interface MoveResult {
+  newPath: string
+}
+
+async function resolveMoveTarget(source: string, destDir: string): Promise<string> {
+  const baseName = path.basename(source)
+  const isDir = (await fs.stat(source)).isDirectory()
+  let target = path.join(destDir, baseName)
+
+  // If the destination IS the source's current parent, keep the same filename
+  // (no renaming) — only a reorder is happening.
+  if (path.resolve(target) === path.resolve(source)) return target
+
+  if (await exists(target)) {
+    const ext = isDir ? '' : path.extname(baseName)
+    const base = isDir ? baseName : baseName.slice(0, -ext.length)
+    let counter = 2
+    while (await exists(path.join(destDir, `${base}-${counter}${ext}`))) {
+      counter++
+    }
+    target = path.join(destDir, `${base}-${counter}${ext}`)
+  }
+  return target
+}
+
+async function renumberChildren(
+  parentDir: string,
+  movedPath: string,
+  targetIndex: number
+): Promise<void> {
+  // Gather the parent's current children (requests + collection sub-dirs) with
+  // their sort orders, re-insert movedPath at targetIndex, and rewrite each.
+  type Child = { path: string; sortOrder: number; kind: 'request' | 'collection' }
+  const children: Child[] = []
+
+  const entries = await fs.readdir(parentDir, { withFileTypes: true })
+  for (const entry of entries) {
+    const entryPath = path.join(parentDir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === '.kleanrest' || entry.name === 'environments') continue
+      const cjson = path.join(entryPath, 'collection.json')
+      try {
+        const raw = await fs.readFile(cjson, 'utf-8')
+        const meta: CollectionMeta = JSON.parse(raw)
+        children.push({ path: entryPath, sortOrder: meta.sortOrder ?? 0, kind: 'collection' })
+      } catch {
+        // Not a collection folder
+      }
+    } else if (entry.isFile() && entry.name.endsWith('.request.json')) {
+      try {
+        const raw = await fs.readFile(entryPath, 'utf-8')
+        const def: RequestDefinition = JSON.parse(raw)
+        children.push({ path: entryPath, sortOrder: def.sortOrder ?? 0, kind: 'request' })
+      } catch {
+        // Skip
+      }
+    }
+  }
+
+  // Sort by current sortOrder
+  children.sort((a, b) => a.sortOrder - b.sortOrder)
+
+  // Remove the moved item from its current slot, then re-insert at target
+  const movedResolved = path.resolve(movedPath)
+  const withoutMoved = children.filter((c) => path.resolve(c.path) !== movedResolved)
+  const moved = children.find((c) => path.resolve(c.path) === movedResolved)
+  if (!moved) return
+
+  const clampedIndex = Math.max(0, Math.min(targetIndex, withoutMoved.length))
+  withoutMoved.splice(clampedIndex, 0, moved)
+
+  // Rewrite sortOrder for each in their new index
+  for (let i = 0; i < withoutMoved.length; i++) {
+    const c = withoutMoved[i]
+    if (c.kind === 'request') {
+      const raw = await fs.readFile(c.path, 'utf-8')
+      const def: RequestDefinition = JSON.parse(raw)
+      if (def.sortOrder === i) continue
+      def.sortOrder = i
+      def.updatedAt = new Date().toISOString()
+      await fs.writeFile(c.path, JSON.stringify(def, null, 2), 'utf-8')
+    } else {
+      const cjson = path.join(c.path, 'collection.json')
+      const raw = await fs.readFile(cjson, 'utf-8')
+      const meta: CollectionMeta = JSON.parse(raw)
+      if (meta.sortOrder === i) continue
+      meta.sortOrder = i
+      await fs.writeFile(cjson, JSON.stringify(meta, null, 2), 'utf-8')
+    }
+  }
+}
+
+/**
+ * Move a request or collection into a different parent directory.
+ * If targetIndex is provided, the moved item is placed at that index among its
+ * new siblings and sortOrder is re-numbered for all of them.
+ */
+export async function moveNode(
+  sourcePath: string,
+  destParentPath: string,
+  targetIndex?: number
+): Promise<MoveResult> {
+  const stat = await fs.stat(sourcePath)
+  const isRequest = !stat.isDirectory() && sourcePath.endsWith('.request.json')
+  const isCollection =
+    stat.isDirectory() && (await exists(path.join(sourcePath, 'collection.json')))
+
+  if (!isRequest && !isCollection) {
+    throw new Error('Source must be a request file or a collection folder')
+  }
+
+  // Requests can only live inside collections
+  if (isRequest) {
+    if (!(await exists(path.join(destParentPath, 'collection.json')))) {
+      throw new Error('Requests can only be moved into a collection')
+    }
+  }
+
+  if (isCollection) {
+    const sourceResolved = path.resolve(sourcePath)
+    const destResolved = path.resolve(destParentPath)
+    if (destResolved === sourceResolved) {
+      throw new Error('Cannot move a collection into itself')
+    }
+    if (destResolved.startsWith(sourceResolved + path.sep)) {
+      throw new Error('Cannot move a collection into one of its descendants')
+    }
+  }
+
+  const target = await resolveMoveTarget(sourcePath, destParentPath)
+  const isSameLocation = path.resolve(target) === path.resolve(sourcePath)
+
+  if (!isSameLocation) {
+    try {
+      await fs.rename(sourcePath, target)
+    } catch (err) {
+      // Cross-device renames fail with EXDEV — fall back to recursive copy + delete
+      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+        if (isCollection) {
+          await fs.cp(sourcePath, target, { recursive: true })
+          await fs.rm(sourcePath, { recursive: true, force: true })
+        } else {
+          await fs.copyFile(sourcePath, target)
+          await fs.unlink(sourcePath)
+        }
+      } else {
+        throw err
+      }
+    }
+  }
+
+  if (targetIndex !== undefined) {
+    await renumberChildren(destParentPath, target, targetIndex)
+  }
+
+  return { newPath: target }
 }
 
 // ── Request operations ───────────────────────────────────────────────────────

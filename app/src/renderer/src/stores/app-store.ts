@@ -73,6 +73,7 @@ interface AppState {
   switchWorkspace: (path: string) => Promise<void>
   loadProjects: () => Promise<void>
   openProject: (path: string) => Promise<void>
+  deleteProject: (path: string) => Promise<void>
   loadProjectTree: () => Promise<void>
 
   openRequest: (path: string) => Promise<void>
@@ -100,6 +101,16 @@ interface AppState {
   createRequest: (collectionPath: string, name: string) => Promise<void>
   deleteRequest: (path: string) => Promise<void>
   deleteCollection: (path: string) => Promise<void>
+  deleteNodes: (paths: string[]) => Promise<void>
+  moveNode: (
+    sourcePath: string,
+    destParentPath: string,
+    targetIndex?: number
+  ) => Promise<{ newPath: string }>
+  moveNodes: (
+    sourcePaths: string[],
+    destParentPath: string
+  ) => Promise<void>
 
   clearHistoryForRequest: (requestId: string) => Promise<void>
 
@@ -112,6 +123,16 @@ interface AppState {
   importPostman: (
     dumpPath: string
   ) => Promise<{ projects: string[]; environments: number; requests: number }>
+  importPostmanCollection: (
+    filePath: string,
+    projectPath: string
+  ) => Promise<{
+    collectionPath: string
+    collectionName: string
+    merged: boolean
+    added: number
+    updated: number
+  }>
 }
 
 function resolveVariables(
@@ -292,6 +313,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       { projectPath: activeProjectPath }
     )
     set({ projectTree: result.tree })
+  },
+
+  deleteProject: async (projectPath: string) => {
+    await ipc<void>('project:delete', { projectPath })
+    const { activeProjectPath, workspacePath } = get()
+    if (activeProjectPath === projectPath) {
+      set({
+        activeProjectPath: null,
+        projectTree: [],
+        openTabs: [],
+        activeTabId: null,
+        activeRequest: null,
+        activeRequestPath: null,
+        activeRequestDirty: false,
+        response: null,
+        environments: [],
+        activeEnvironmentId: null,
+        historyEntries: []
+      })
+      if (workspacePath) {
+        localStorage.removeItem(`kleanrest:lastProject:${workspacePath}`)
+      }
+    }
+    await get().loadProjects()
   },
 
   openRequest: async (path: string) => {
@@ -658,6 +703,50 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadProjectTree()
   },
 
+  deleteNodes: async (paths: string[]) => {
+    // Best-effort bulk delete: we don't know each node's type from the path alone,
+    // so try request delete first, fall back to collection delete.
+    const { openTabs, closeTab } = get()
+    for (const p of paths) {
+      try {
+        if (p.endsWith('.request.json')) {
+          await ipc<void>('request:delete', { requestPath: p })
+          const tab = openTabs.find((t) => t.path === p)
+          if (tab) closeTab(tab.id)
+        } else {
+          await ipc<void>('collection:delete', { collectionPath: p })
+        }
+      } catch {
+        // Continue through the list even if one fails
+      }
+    }
+    await get().loadProjectTree()
+  },
+
+  moveNode: async (sourcePath, destParentPath, targetIndex) => {
+    const result = await ipc<{ newPath: string }>('node:move', {
+      sourcePath,
+      destParentPath,
+      targetIndex
+    })
+    await get().loadProjectTree()
+    return result
+  },
+
+  moveNodes: async (sourcePaths, destParentPath) => {
+    for (const sp of sourcePaths) {
+      try {
+        await ipc<{ newPath: string }>('node:move', {
+          sourcePath: sp,
+          destParentPath
+        })
+      } catch {
+        // Continue through the list even if one move fails
+      }
+    }
+    await get().loadProjectTree()
+  },
+
   clearHistoryForRequest: async (requestId: string) => {
     const { activeProjectPath } = get()
     if (!activeProjectPath) return
@@ -755,6 +844,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       outputPath: workspacePath
     })
     await get().loadProjects()
+    return result
+  },
+
+  importPostmanCollection: async (filePath: string, projectPath: string) => {
+    const result = await ipc<{
+      collectionPath: string
+      collectionName: string
+      merged: boolean
+      added: number
+      updated: number
+    }>('import:postman-collection', { filePath, projectPath })
+
+    // If the user imported into the currently active project, refresh the tree
+    if (get().activeProjectPath === projectPath) {
+      await get().loadProjectTree()
+    }
     return result
   }
 }))

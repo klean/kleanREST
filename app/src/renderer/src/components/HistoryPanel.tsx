@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useAppStore } from '@renderer/stores/app-store'
 import { ipc } from '@renderer/lib/ipc'
+import { confirm } from '@renderer/lib/confirm'
 import HistoryDetail from '@renderer/components/HistoryDetail'
 import type { HistoryEntry } from '@shared/types/history'
 
@@ -150,9 +151,15 @@ export default function HistoryPanel(): JSX.Element {
                   </div>
                 </div>
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation()
-                    useAppStore.getState().clearHistoryForRequest(entry.requestId)
+                    const ok = await confirm({
+                      title: 'Clear history for this request?',
+                      message: `All history entries for "${entry.requestName}" will be permanently deleted.`,
+                      confirmLabel: 'Clear',
+                      destructive: true
+                    })
+                    if (ok) useAppStore.getState().clearHistoryForRequest(entry.requestId)
                   }}
                   className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 hover:bg-zinc-700 hover:text-zinc-400 group-hover:opacity-100"
                   title="Clear history for this request"

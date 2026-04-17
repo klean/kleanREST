@@ -1,10 +1,12 @@
 import * as fs from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
   RequestDefinition,
   RequestAuth,
   RequestBody,
+  CollectionMeta,
   KeyValuePair,
   FormDataEntry,
   HttpMethod
@@ -54,6 +56,10 @@ interface PostmanBody {
   mode: string
   raw?: string
   formdata?: PostmanFormDataEntry[]
+  graphql?: {
+    query?: string
+    variables?: string
+  }
   options?: {
     raw?: {
       language?: string
@@ -200,6 +206,26 @@ function convertBody(body?: PostmanBody): RequestBody {
       ...defaultBody,
       mode: 'formdata',
       formData
+    }
+  }
+
+  if (body.mode === 'graphql' && body.graphql) {
+    // Postman keeps graphql as a separate mode; over the wire it's just JSON.
+    // Convert to a json body with the canonical { query, variables } shape.
+    let variables: unknown = {}
+    const rawVars = body.graphql.variables
+    if (rawVars && rawVars.trim().length > 0) {
+      try {
+        variables = JSON.parse(rawVars)
+      } catch {
+        variables = rawVars
+      }
+    }
+    const payload = { query: body.graphql.query || '', variables }
+    return {
+      ...defaultBody,
+      mode: 'json',
+      json: JSON.stringify(payload, null, 2)
     }
   }
 
@@ -433,6 +459,168 @@ export async function importPostmanDump(
   }
 
   return result
+}
+
+// ── Single-collection import (with merge) ──────────────────────────────────
+
+export interface CollectionImportResult {
+  collectionPath: string
+  collectionName: string
+  merged: boolean
+  added: number
+  updated: number
+}
+
+async function scanCollectionDir(dir: string): Promise<{
+  subfolders: Map<string, string>
+  requests: Map<string, { path: string; def: RequestDefinition }>
+  maxSortOrder: number
+}> {
+  const subfolders = new Map<string, string>()
+  const requests = new Map<string, { path: string; def: RequestDefinition }>()
+  let maxSortOrder = -1
+
+  let entries: Dirent[]
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return { subfolders, requests, maxSortOrder }
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === '.kleanrest' || entry.name === 'environments') continue
+      const cjson = path.join(entryPath, 'collection.json')
+      try {
+        const raw = await fs.readFile(cjson, 'utf-8')
+        const meta: CollectionMeta = JSON.parse(raw)
+        subfolders.set(meta.name, entryPath)
+        if (meta.sortOrder > maxSortOrder) maxSortOrder = meta.sortOrder
+      } catch {
+        // Not a collection folder — skip
+      }
+    } else if (entry.isFile() && entry.name.endsWith('.request.json')) {
+      try {
+        const raw = await fs.readFile(entryPath, 'utf-8')
+        const def: RequestDefinition = JSON.parse(raw)
+        requests.set(def.name, { path: entryPath, def })
+        if (def.sortOrder > maxSortOrder) maxSortOrder = def.sortOrder
+      } catch {
+        // Skip unreadable
+      }
+    }
+  }
+
+  return { subfolders, requests, maxSortOrder }
+}
+
+async function mergeIntoDir(
+  items: PostmanItem[],
+  targetDir: string,
+  counters: { added: number; updated: number }
+): Promise<void> {
+  const { subfolders, requests, maxSortOrder } = await scanCollectionDir(targetDir)
+  let nextSortOrder = maxSortOrder + 1
+
+  for (const item of items) {
+    if (item.item && item.item.length > 0) {
+      // Folder — recurse if name matches, else create new
+      const existingSub = subfolders.get(item.name)
+      if (existingSub) {
+        await mergeIntoDir(item.item, existingSub, counters)
+      } else {
+        const folderName = sanitizeFilename(item.name) || 'folder'
+        let newPath = path.join(targetDir, folderName)
+        newPath = await uniquePath(newPath, true)
+        await ensureDir(newPath)
+        const meta = createDefaultCollection(item.name, randomUUID())
+        meta.sortOrder = nextSortOrder++
+        await fs.writeFile(
+          path.join(newPath, 'collection.json'),
+          JSON.stringify(meta, null, 2),
+          'utf-8'
+        )
+        const subCounters = { requests: 0 }
+        await writeItems(item.item, newPath, subCounters)
+        counters.added += subCounters.requests
+      }
+    } else if (item.request) {
+      const existing = requests.get(item.name)
+      if (existing) {
+        // Overwrite preserving id, createdAt, sortOrder so history links & ordering survive
+        const incoming = convertRequest(item, existing.def.sortOrder)
+        const mergedDef: RequestDefinition = {
+          ...incoming,
+          id: existing.def.id,
+          sortOrder: existing.def.sortOrder,
+          createdAt: existing.def.createdAt,
+          updatedAt: new Date().toISOString()
+        }
+        await fs.writeFile(existing.path, JSON.stringify(mergedDef, null, 2), 'utf-8')
+        counters.updated++
+      } else {
+        const def = convertRequest(item, nextSortOrder++)
+        const filename = sanitizeFilename(item.name) + '.request.json'
+        let filePath = path.join(targetDir, filename)
+        filePath = await uniquePath(filePath, false)
+        await fs.writeFile(filePath, JSON.stringify(def, null, 2), 'utf-8')
+        counters.added++
+      }
+    }
+  }
+}
+
+export async function importPostmanCollection(
+  filePath: string,
+  projectPath: string
+): Promise<CollectionImportResult> {
+  const raw = await fs.readFile(filePath, 'utf-8')
+  const collection: PostmanCollection = JSON.parse(raw)
+  const collectionName = collection.info?.name || 'Imported Collection'
+
+  const collectionsDir = path.join(projectPath, 'collections')
+  await ensureDir(collectionsDir)
+
+  // Find an existing top-level collection with the same display name
+  const { subfolders } = await scanCollectionDir(collectionsDir)
+  const existingPath = subfolders.get(collectionName)
+
+  const counters = { added: 0, updated: 0 }
+
+  if (existingPath) {
+    await mergeIntoDir(collection.item, existingPath, counters)
+    return {
+      collectionPath: existingPath,
+      collectionName,
+      merged: true,
+      added: counters.added,
+      updated: counters.updated
+    }
+  }
+
+  // Create fresh collection
+  const folderName = sanitizeFilename(collectionName)
+  let newPath = path.join(collectionsDir, folderName)
+  newPath = await uniquePath(newPath, true)
+  await ensureDir(newPath)
+  const meta = createDefaultCollection(collectionName, randomUUID())
+  await fs.writeFile(
+    path.join(newPath, 'collection.json'),
+    JSON.stringify(meta, null, 2),
+    'utf-8'
+  )
+
+  const subCounters = { requests: 0 }
+  await writeItems(collection.item, newPath, subCounters)
+
+  return {
+    collectionPath: newPath,
+    collectionName,
+    merged: false,
+    added: subCounters.requests,
+    updated: 0
+  }
 }
 
 // ── Read environments only (for selective import) ───────────────────────────

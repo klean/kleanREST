@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { v4 as uuid } from 'uuid'
 import { useAppStore } from '@renderer/stores/app-store'
 import { ipc } from '@renderer/lib/ipc'
+import { confirm } from '@renderer/lib/confirm'
 import type { Environment, EnvironmentVariable } from '@shared/types/environment'
 import { ENV_COLOR_PRESETS } from '@shared/types/environment'
 interface ProjectCollections {
@@ -95,13 +96,21 @@ export default function EnvironmentManager(): JSX.Element {
 
   const handleDeleteEnv = useCallback(async () => {
     if (!activeProjectPath || !selectedEnvId) return
+    const name = environments.find((e) => e.id === selectedEnvId)?.name || 'this environment'
+    const ok = await confirm({
+      title: 'Delete environment?',
+      message: `"${name}" will be permanently deleted from the project (including its secret values).`,
+      confirmLabel: 'Delete',
+      destructive: true
+    })
+    if (!ok) return
     await ipc('env:delete', {
       projectPath: activeProjectPath,
       envId: selectedEnvId
     })
     await loadEnvironments()
     setSelectedEnvId(null)
-  }, [activeProjectPath, selectedEnvId, loadEnvironments])
+  }, [activeProjectPath, selectedEnvId, environments, loadEnvironments])
 
   const updateVariable = useCallback(
     (index: number, field: keyof EnvironmentVariable, value: string | boolean) => {

@@ -53,6 +53,10 @@ export interface IpcChannels {
     params: { workspacePath: string }
     result: { name: string; path: string; projectName: string }[]
   }
+  'project:delete': {
+    params: { projectPath: string }
+    result: void
+  }
 
   // Collection operations
   'collection:create': {
@@ -83,6 +87,10 @@ export interface IpcChannels {
   }
   'request:rename': {
     params: { requestPath: string; newName: string }
+    result: { newPath: string }
+  }
+  'node:move': {
+    params: { sourcePath: string; destParentPath: string; targetIndex?: number }
     result: { newPath: string }
   }
 
@@ -123,6 +131,10 @@ export interface IpcChannels {
     params: void
     result: string | null
   }
+  'dialog:open-file': {
+    params: { filters?: { name: string; extensions: string[] }[] } | void
+    result: string | null
+  }
 
   // Import
   'import:postman': {
@@ -132,6 +144,16 @@ export interface IpcChannels {
   'import:postman-environments': {
     params: { dumpPath: string }
     result: Environment[]
+  }
+  'import:postman-collection': {
+    params: { filePath: string; projectPath: string }
+    result: {
+      collectionPath: string
+      collectionName: string
+      merged: boolean
+      added: number
+      updated: number
+    }
   }
 
   // Workspaces

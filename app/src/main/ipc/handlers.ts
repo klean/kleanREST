@@ -14,10 +14,12 @@ import {
   listEnvironments,
   saveEnvironment,
   deleteEnvironment,
-  listAllCollections
+  listAllCollections,
+  deleteProject,
+  moveNode
 } from '../project/loader'
 import { saveHistory, listHistory, clearHistory, clearHistoryForRequest } from '../history/manager'
-import { importPostmanDump, readPostmanEnvironments } from '../import/postman-importer'
+import { importPostmanDump, readPostmanEnvironments, importPostmanCollection } from '../import/postman-importer'
 import { getWorkspaces, addWorkspace, removeWorkspace, createWorkspace, getLastActiveWorkspace, setLastActiveWorkspace } from '../config/app-config'
 import { isGitRepo, getBranchName, gitFetch, getAheadBehind, gitPull, gitStatus, gitCommit, gitPush } from '../git/git-operations'
 import { checkForUpdates, downloadUpdate, quitAndInstall, getLastUpdaterStatus } from '../updater/auto-updater'
@@ -50,6 +52,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('project:list-collections', async (_event, params) => {
     await assertIsRegisteredWorkspace(params.workspacePath)
     return listAllCollections(params.workspacePath)
+  })
+
+  ipcMain.handle('project:delete', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
+    return deleteProject(params.projectPath)
   })
 
   // ── Collection operations ────────────────────────────────────────────────
@@ -90,6 +97,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('request:rename', async (_event, params) => {
     await assertPathInWorkspace(params.requestPath)
     return renameRequest(params.requestPath, params.newName)
+  })
+
+  ipcMain.handle('node:move', async (_event, params) => {
+    // Source and destination can be in different workspaces; both must be inside one.
+    await assertPathInWorkspace(params.sourcePath)
+    await assertPathInWorkspace(params.destParentPath)
+    return moveNode(params.sourcePath, params.destParentPath, params.targetIndex)
   })
 
   // ── Environment operations ───────────────────────────────────────────────
@@ -145,10 +159,24 @@ export function registerIpcHandlers(): void {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('dialog:open-file', async (_event, params) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: params?.filters
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return result.filePaths[0]
+  })
+
   // ── Import ───────────────────────────────────────────────────────────────
 
-  // dumpPath comes from a user-initiated folder dialog, so it may legitimately
-  // be anywhere on disk. outputPath must be a registered workspace.
+  // dumpPath / filePath come from user-initiated dialogs, so they may
+  // legitimately be anywhere on disk. The write target (outputPath /
+  // projectPath) must be inside a registered workspace.
   ipcMain.handle('import:postman', async (_event, params) => {
     await assertIsRegisteredWorkspace(params.outputPath)
     return importPostmanDump(params.dumpPath, params.outputPath)
@@ -156,6 +184,11 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('import:postman-environments', async (_event, params) => {
     return readPostmanEnvironments(params.dumpPath)
+  })
+
+  ipcMain.handle('import:postman-collection', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
+    return importPostmanCollection(params.filePath, params.projectPath)
   })
 
   // ── Workspaces ────────────────────────────────────────────────────────
