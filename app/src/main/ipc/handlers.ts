@@ -20,6 +20,7 @@ import { saveHistory, listHistory, clearHistory, clearHistoryForRequest } from '
 import { importPostmanDump, readPostmanEnvironments } from '../import/postman-importer'
 import { getWorkspaces, addWorkspace, removeWorkspace, createWorkspace, getLastActiveWorkspace, setLastActiveWorkspace } from '../config/app-config'
 import { isGitRepo, getBranchName, gitFetch, getAheadBehind, gitPull, gitStatus, gitCommit, gitPush } from '../git/git-operations'
+import { checkForUpdates, downloadUpdate, quitAndInstall, getLastUpdaterStatus } from '../updater/auto-updater'
 
 export function registerIpcHandlers(): void {
   // ── Request execution ────────────────────────────────────────────────────
@@ -155,6 +156,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('workspace:set-last', async (_event, params) => {
     return setLastActiveWorkspace(params.path)
   })
+
+  // ── Updater ──────────────────────────────────────────────────────────
+
+  ipcMain.handle('updater:check', async () => checkForUpdates())
+  ipcMain.handle('updater:download', async () => downloadUpdate())
+  ipcMain.handle('updater:install', async () => quitAndInstall())
+  ipcMain.handle('updater:get-status', async () => getLastUpdaterStatus())
 
   // ── Git ──────────────────────────────────────────────────────────────
 

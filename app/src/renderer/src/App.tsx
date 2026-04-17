@@ -12,6 +12,7 @@ import CurlImportDialog from '@renderer/components/CurlImportDialog'
 import WorkspaceSelector from '@renderer/components/WorkspaceSelector'
 import GitStatusBar from '@renderer/components/GitStatusBar'
 import GitPanel from '@renderer/components/GitPanel'
+import UpdatePrompt from '@renderer/components/UpdatePrompt'
 import { ipc } from '@renderer/lib/ipc'
 
 function App(): JSX.Element {
@@ -263,6 +264,13 @@ function App(): JSX.Element {
               >
                 Environments
               </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-zinc-700" />
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-zinc-300 outline-none hover:bg-zinc-700 hover:text-zinc-100"
+                onSelect={() => ipc('updater:check')}
+              >
+                Check for Updates
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -342,6 +350,9 @@ function App(): JSX.Element {
       {showNewProjectDialog && <NewProjectDialog />}
       {showCurlImportDialog && <CurlImportDialog />}
       {showGitPanel && <GitPanel />}
+
+      {/* Auto-update prompt */}
+      <UpdatePrompt />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import type { Environment } from './environment'
 import type { HistoryEntry } from './history'
 import type { ErrorInsight } from './error-insight'
 import type { GitFileStatus } from './git'
+import type { UpdaterStatus } from './updater'
 
 export interface RequestResult {
   status: number
@@ -191,5 +192,23 @@ export interface IpcChannels {
   'git:push': {
     params: { dirPath: string }
     result: { success: boolean; output: string }
+  }
+
+  // Updater
+  'updater:check': {
+    params: void
+    result: void
+  }
+  'updater:download': {
+    params: void
+    result: void
+  }
+  'updater:install': {
+    params: void
+    result: void
+  }
+  'updater:get-status': {
+    params: void
+    result: UpdaterStatus
   }
 }
