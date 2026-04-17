@@ -4,6 +4,12 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
 import { initAutoUpdater } from './updater/auto-updater'
 
+// The PNG next to the build/ dir — used for the window icon (taskbar / Linux).
+// On Windows/macOS packaged builds the platform-specific icon from
+// electron-builder is used instead; this icon option is mainly for
+// development mode and Linux.
+const WINDOW_ICON = join(__dirname, '../../build/icon.png')
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1400,
@@ -13,6 +19,7 @@ function createWindow(): void {
     show: false,
     title: 'kleanREST',
     titleBarStyle: 'hiddenInset',
+    icon: WINDOW_ICON,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,

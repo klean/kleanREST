@@ -150,21 +150,22 @@ export default function RequestEditor(): JSX.Element {
           </Select.Portal>
         </Select.Root>
 
-        {/* URL input */}
+        {/* URL input — expands to fill all available space */}
         <VariableInput
           value={activeRequest.url}
           onChange={(val) => updateActiveRequest({ url: val })}
           variables={activeEnvVars}
           placeholder="Enter request URL..."
-          className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+          containerClassName="flex-1 min-w-0"
+          className="rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
           onKeyDown={handleKeyDown}
         />
 
-        {/* Send button */}
+        {/* Send button — pushed to the right by the flex-1 URL input above */}
         <button
           onClick={handleSend}
           disabled={isLoading}
-          className="rounded-md bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="ml-auto shrink-0 rounded-md bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? 'Sending...' : 'Send'}
         </button>

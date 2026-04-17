@@ -16,6 +16,7 @@ import UpdatePrompt from '@renderer/components/UpdatePrompt'
 import ConfirmDialog from '@renderer/components/ConfirmDialog'
 import { ipc } from '@renderer/lib/ipc'
 import { confirm } from '@renderer/lib/confirm'
+import logoUrl from '@renderer/assets/logo.png'
 
 function App(): JSX.Element {
   const {
@@ -110,10 +111,13 @@ function App(): JSX.Element {
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Top toolbar */}
       <div className="flex h-12 shrink-0 items-center border-b border-zinc-700 bg-zinc-800 px-3 gap-3">
-        {/* App name */}
-        <span className="text-sm font-semibold text-zinc-100 select-none tracking-tight">
-          kleanREST
-        </span>
+        {/* App logo */}
+        <img
+          src={logoUrl}
+          alt="kleanREST"
+          className="h-6 w-auto shrink-0 select-none"
+          draggable={false}
+        />
 
         <div className="mx-1 h-5 w-px bg-zinc-700" />
 
@@ -405,7 +409,12 @@ function WelcomePage({
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="text-center">
-        <h1 className="mb-2 text-2xl font-bold text-zinc-200">kleanREST</h1>
+        <img
+          src={logoUrl}
+          alt="kleanREST"
+          className="mx-auto mb-3 h-16 w-auto select-none"
+          draggable={false}
+        />
         <p className="mb-6 text-sm text-zinc-500">
           A git-friendly REST client for teams
         </p>

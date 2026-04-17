@@ -9,6 +9,7 @@ interface VariableInputProps {
   variables: EnvironmentVariable[]
   placeholder?: string
   className?: string
+  containerClassName?: string
   onKeyDown?: (e: React.KeyboardEvent) => void
   multiline?: boolean
   type?: string
@@ -20,6 +21,7 @@ export default function VariableInput({
   variables,
   placeholder,
   className = '',
+  containerClassName = '',
   onKeyDown,
   multiline = false,
   type
@@ -173,10 +175,10 @@ export default function VariableInput({
     ? 'whitespace-pre-wrap break-all'
     : 'whitespace-pre overflow-hidden'
 
-  const inputClasses = `${className} ${textClasses}`
+  const inputClasses = `w-full ${className} ${textClasses}`
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className={`relative ${containerClassName}`}>
       {/* Colored overlay - only render when there are variables to highlight */}
       {hasVariables && (
         <div
