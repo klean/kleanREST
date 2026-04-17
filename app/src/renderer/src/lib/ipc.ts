@@ -1,3 +1,11 @@
-export async function ipc<T>(channel: string, params?: unknown): Promise<T> {
-  return window.electronAPI.invoke(channel, params) as Promise<T>
+import type { IpcChannels } from '@shared/types/ipc'
+
+export async function ipc<R>(
+  channel: keyof IpcChannels,
+  params?: unknown
+): Promise<R> {
+  return window.electronAPI.invoke(
+    channel,
+    params as IpcChannels[typeof channel]['params']
+  ) as Promise<R>
 }

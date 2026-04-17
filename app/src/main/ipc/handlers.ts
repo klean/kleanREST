@@ -21,6 +21,7 @@ import { importPostmanDump, readPostmanEnvironments } from '../import/postman-im
 import { getWorkspaces, addWorkspace, removeWorkspace, createWorkspace, getLastActiveWorkspace, setLastActiveWorkspace } from '../config/app-config'
 import { isGitRepo, getBranchName, gitFetch, getAheadBehind, gitPull, gitStatus, gitCommit, gitPush } from '../git/git-operations'
 import { checkForUpdates, downloadUpdate, quitAndInstall, getLastUpdaterStatus } from '../updater/auto-updater'
+import { assertPathInWorkspace, assertIsRegisteredWorkspace } from '../security/path-guard'
 
 export function registerIpcHandlers(): void {
   // ── Request execution ────────────────────────────────────────────────────
@@ -32,82 +33,101 @@ export function registerIpcHandlers(): void {
   // ── Project operations ───────────────────────────────────────────────────
 
   ipcMain.handle('project:load', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return loadProject(params.projectPath)
   })
 
   ipcMain.handle('project:create', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.parentPath)
     return createProject(params.parentPath, params.name)
   })
 
   ipcMain.handle('project:list', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.workspacePath)
     return listProjects(params.workspacePath)
   })
 
   ipcMain.handle('project:list-collections', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.workspacePath)
     return listAllCollections(params.workspacePath)
   })
 
   // ── Collection operations ────────────────────────────────────────────────
 
   ipcMain.handle('collection:create', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
+    await assertPathInWorkspace(params.collectionPath)
     return createCollection(params.projectPath, params.collectionPath, params.name)
   })
 
   ipcMain.handle('collection:delete', async (_event, params) => {
+    await assertPathInWorkspace(params.collectionPath)
     return deleteCollection(params.collectionPath)
   })
 
   // ── Request file operations ──────────────────────────────────────────────
 
   ipcMain.handle('request:load', async (_event, params) => {
+    await assertPathInWorkspace(params.requestPath)
     return loadRequest(params.requestPath)
   })
 
   ipcMain.handle('request:save', async (_event, params) => {
+    await assertPathInWorkspace(params.requestPath)
     return saveRequest(params.requestPath, params.request)
   })
 
   ipcMain.handle('request:create', async (_event, params) => {
+    await assertPathInWorkspace(params.collectionPath)
     return createRequest(params.collectionPath, params.name)
   })
 
   ipcMain.handle('request:delete', async (_event, params) => {
+    await assertPathInWorkspace(params.requestPath)
     return deleteRequest(params.requestPath)
   })
 
   ipcMain.handle('request:rename', async (_event, params) => {
+    await assertPathInWorkspace(params.requestPath)
     return renameRequest(params.requestPath, params.newName)
   })
 
   // ── Environment operations ───────────────────────────────────────────────
 
   ipcMain.handle('env:list', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return listEnvironments(params.projectPath)
   })
 
   ipcMain.handle('env:save', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return saveEnvironment(params.projectPath, params.environment)
   })
 
   ipcMain.handle('env:delete', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return deleteEnvironment(params.projectPath, params.envId)
   })
 
   // ── History ──────────────────────────────────────────────────────────────
 
   ipcMain.handle('history:list', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return listHistory(params.projectPath, params.limit, params.offset, params.requestId)
   })
 
   ipcMain.handle('history:save', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return saveHistory(params.projectPath, params.entry)
   })
 
   ipcMain.handle('history:clear', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return clearHistory(params.projectPath)
   })
 
   ipcMain.handle('history:clear-for-request', async (_event, params) => {
+    await assertPathInWorkspace(params.projectPath)
     return clearHistoryForRequest(params.projectPath, params.requestId)
   })
 
@@ -127,7 +147,10 @@ export function registerIpcHandlers(): void {
 
   // ── Import ───────────────────────────────────────────────────────────────
 
+  // dumpPath comes from a user-initiated folder dialog, so it may legitimately
+  // be anywhere on disk. outputPath must be a registered workspace.
   ipcMain.handle('import:postman', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.outputPath)
     return importPostmanDump(params.dumpPath, params.outputPath)
   })
 
@@ -137,6 +160,8 @@ export function registerIpcHandlers(): void {
 
   // ── Workspaces ────────────────────────────────────────────────────────
 
+  // workspace:add, workspace:create, and workspace:remove all deal with paths
+  // the user has explicitly picked or previously registered, so no guard applies here.
   ipcMain.handle('workspace:list', async () => {
     return getWorkspaces()
   })
@@ -154,6 +179,7 @@ export function registerIpcHandlers(): void {
     return getLastActiveWorkspace()
   })
   ipcMain.handle('workspace:set-last', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.path)
     return setLastActiveWorkspace(params.path)
   })
 
@@ -166,12 +192,36 @@ export function registerIpcHandlers(): void {
 
   // ── Git ──────────────────────────────────────────────────────────────
 
-  ipcMain.handle('git:is-repo', async (_event, params) => isGitRepo(params.dirPath))
-  ipcMain.handle('git:branch', async (_event, params) => getBranchName(params.dirPath))
-  ipcMain.handle('git:fetch', async (_event, params) => gitFetch(params.dirPath))
-  ipcMain.handle('git:ahead-behind', async (_event, params) => getAheadBehind(params.dirPath))
-  ipcMain.handle('git:pull', async (_event, params) => gitPull(params.dirPath))
-  ipcMain.handle('git:status', async (_event, params) => gitStatus(params.dirPath))
-  ipcMain.handle('git:commit', async (_event, params) => gitCommit(params.dirPath, params.message))
-  ipcMain.handle('git:push', async (_event, params) => gitPush(params.dirPath))
+  ipcMain.handle('git:is-repo', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return isGitRepo(params.dirPath)
+  })
+  ipcMain.handle('git:branch', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return getBranchName(params.dirPath)
+  })
+  ipcMain.handle('git:fetch', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return gitFetch(params.dirPath)
+  })
+  ipcMain.handle('git:ahead-behind', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return getAheadBehind(params.dirPath)
+  })
+  ipcMain.handle('git:pull', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return gitPull(params.dirPath)
+  })
+  ipcMain.handle('git:status', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return gitStatus(params.dirPath)
+  })
+  ipcMain.handle('git:commit', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return gitCommit(params.dirPath, params.message)
+  })
+  ipcMain.handle('git:push', async (_event, params) => {
+    await assertIsRegisteredWorkspace(params.dirPath)
+    return gitPush(params.dirPath)
+  })
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ipc } from '@renderer/lib/ipc'
-import type { UpdaterStatus } from '../../../shared/types/updater'
-import { UPDATER_STATUS_CHANNEL } from '../../../shared/types/updater'
+import type { UpdaterStatus } from '@shared/types/updater'
+import { UPDATER_STATUS_CHANNEL } from '@shared/types/updater'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

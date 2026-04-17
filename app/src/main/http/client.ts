@@ -89,9 +89,25 @@ function makeRequest(
   })
 }
 
+// Hard upper bounds — keep renderer-supplied values from being pathological.
+const MAX_REDIRECTS_LIMIT = 20
+const MAX_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const DEFAULT_TIMEOUT_MS = 30 * 1000
+
+function clampPositive(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback
+  return Math.min(Math.max(value, min), max)
+}
+
 export async function executeRequest(params: ExecuteRequestParams): Promise<RequestResult> {
   const startTime = Date.now()
   let redirectCount = 0
+
+  const timeoutMs = clampPositive(params.timeout, 1, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)
+  const maxRedirects = Math.min(
+    Math.max(params.maxRedirects | 0, 0),
+    MAX_REDIRECTS_LIMIT
+  )
 
   try {
     let currentUrl = params.url
@@ -128,7 +144,7 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
         rejectUnauthorized: params.validateSSL
       }
 
-      const result = await makeRequest(parsedUrl, options, requestBody, params.timeout)
+      const result = await makeRequest(parsedUrl, options, requestBody, timeoutMs)
       const totalTime = Date.now() - startTime
 
       // Handle redirects
@@ -139,7 +155,7 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
         result.headers.location
       ) {
         redirectCount++
-        if (redirectCount > params.maxRedirects) {
+        if (redirectCount > maxRedirects) {
           const responseHeaders = flattenHeaders(result.headers)
           const insights = analyzeResponse({
             status: result.status,
@@ -151,7 +167,7 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
             requestHeaders: params.headers,
             requestBody: params.body,
             redirectCount,
-            maxRedirects: params.maxRedirects
+            maxRedirects
           })
 
           return {
@@ -196,7 +212,7 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
         requestHeaders: params.headers,
         requestBody: params.body,
         redirectCount,
-        maxRedirects: params.maxRedirects
+        maxRedirects
       })
 
       return {

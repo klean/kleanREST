@@ -48,19 +48,28 @@ async function migrateCollectionEnvsToProject(projectPath: string): Promise<void
   const projectEnvDir = path.join(projectPath, 'environments')
   await ensureDir(projectEnvDir)
 
-  // Also restore from environments.migrated if it exists
+  // Also restore from environments.migrated if it exists. Only remove the
+  // source dir if every copy succeeds — otherwise we could silently drop env
+  // files when a single copy fails.
   const migratedDir = path.join(projectPath, 'environments.migrated')
   try {
     const migrated = await fs.readdir(migratedDir, { withFileTypes: true })
+    let allCopied = true
     for (const entry of migrated) {
       if (entry.isFile() && entry.name.endsWith('.env.json')) {
         const dest = path.join(projectEnvDir, entry.name)
         if (!(await exists(dest))) {
-          await fs.copyFile(path.join(migratedDir, entry.name), dest)
+          try {
+            await fs.copyFile(path.join(migratedDir, entry.name), dest)
+          } catch {
+            allCopied = false
+          }
         }
       }
     }
-    await fs.rm(migratedDir, { recursive: true, force: true })
+    if (allCopied) {
+      await fs.rm(migratedDir, { recursive: true, force: true })
+    }
   } catch {
     // No migrated dir, that's fine
   }

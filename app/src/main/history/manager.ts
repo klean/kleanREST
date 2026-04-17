@@ -10,6 +10,48 @@ function generateShortId(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
+// Headers that commonly carry credentials. Values are redacted before the entry
+// is written to disk so that secrets resolved from env vars don't end up in
+// persisted history (which is inside .kleanrest/ and gitignored, but can still
+// leak via backups, crash reports, file-share, etc.).
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'x-csrf-token',
+  'api-key',
+  'apikey'
+])
+
+const REDACTED = '[REDACTED]'
+
+function redactHeaders(
+  headers: { key: string; value: string }[]
+): { key: string; value: string }[] {
+  return headers.map((h) =>
+    SENSITIVE_HEADER_NAMES.has(h.key.toLowerCase())
+      ? { key: h.key, value: REDACTED }
+      : h
+  )
+}
+
+function redactEntry(entry: HistoryEntry): HistoryEntry {
+  return {
+    ...entry,
+    request: {
+      ...entry.request,
+      headers: redactHeaders(entry.request.headers)
+    },
+    response: entry.response
+      ? { ...entry.response, headers: redactHeaders(entry.response.headers) }
+      : null
+  }
+}
+
 export async function saveHistory(
   projectPath: string,
   entry: HistoryEntry
@@ -22,7 +64,7 @@ export async function saveHistory(
   const filename = `${timestamp}_${shortId}.json`
   const filePath = path.join(historyDir, filename)
 
-  await fs.writeFile(filePath, JSON.stringify(entry, null, 2), 'utf-8')
+  await fs.writeFile(filePath, JSON.stringify(redactEntry(entry), null, 2), 'utf-8')
 }
 
 export async function listHistory(

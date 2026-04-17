@@ -13,10 +13,11 @@ function createWindow(): void {
     show: false,
     title: 'kleanREST',
     titleBarStyle: 'hiddenInset',
-    ...(process.platform === 'linux' ? {} : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
     }
   })
 
@@ -25,7 +26,14 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    try {
+      const parsed = new URL(details.url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        shell.openExternal(details.url)
+      }
+    } catch {
+      // Invalid URL — ignore
+    }
     return { action: 'deny' }
   })
 

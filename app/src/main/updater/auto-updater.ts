@@ -19,6 +19,9 @@ export function getLastUpdaterStatus(): UpdaterStatus {
 
 export function initAutoUpdater(window: BrowserWindow): void {
   statusWindow = window
+  window.once('closed', () => {
+    if (statusWindow === window) statusWindow = null
+  })
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
