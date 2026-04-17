@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useAppStore } from '@renderer/stores/app-store'
 import Sidebar from '@renderer/components/Sidebar'
@@ -14,6 +14,7 @@ import GitStatusBar from '@renderer/components/GitStatusBar'
 import GitPanel from '@renderer/components/GitPanel'
 import UpdatePrompt from '@renderer/components/UpdatePrompt'
 import ConfirmDialog from '@renderer/components/ConfirmDialog'
+import SettingsDialog from '@renderer/components/SettingsDialog'
 import { ipc } from '@renderer/lib/ipc'
 import { confirm } from '@renderer/lib/confirm'
 import logoUrl from '@renderer/assets/logo.png'
@@ -49,6 +50,8 @@ function App(): JSX.Element {
     deleteProject
   } = useAppStore()
 
+  const [showSettings, setShowSettings] = useState(false)
+
   useEffect(() => {
     // Load workspaces on startup and restore last active
     const init = async (): Promise<void> => {
@@ -68,6 +71,22 @@ function App(): JSX.Element {
     const interval = setInterval(() => checkGitStatus(), 60000)
     return () => clearInterval(interval)
   }, [workspacePath, checkGitStatus])
+
+  // When the MCP server executes a request, refresh history so the entry
+  // appears live in the History panel. We read activeProjectPath from the
+  // store inside the handler so the listener doesn't need to re-subscribe.
+  useEffect(() => {
+    const handler = (payload: unknown): void => {
+      const p = payload as { projectPath: string | null } | null
+      if (!p) return
+      const active = useAppStore.getState().activeProjectPath
+      if (p.projectPath && active && p.projectPath === active) {
+        void useAppStore.getState().loadHistory()
+      }
+    }
+    window.electronAPI.on('mcp:request-executed', handler)
+    return () => window.electronAPI.off('mcp:request-executed', handler)
+  }, [])
 
   const handleSelectWorkspace = useCallback(async () => {
     const result = await ipc<string | null>('dialog:open-folder')
@@ -302,6 +321,12 @@ function App(): JSX.Element {
               <DropdownMenu.Separator className="my-1 h-px bg-zinc-700" />
               <DropdownMenu.Item
                 className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-zinc-300 outline-none hover:bg-zinc-700 hover:text-zinc-100"
+                onSelect={() => setShowSettings(true)}
+              >
+                Settings...
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="flex cursor-pointer items-center rounded px-2 py-1.5 text-sm text-zinc-300 outline-none hover:bg-zinc-700 hover:text-zinc-100"
                 onSelect={() => ipc('updater:check')}
               >
                 Check for Updates
@@ -391,6 +416,8 @@ function App(): JSX.Element {
 
       {/* Confirmation dialog (shared across the app) */}
       <ConfirmDialog />
+
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
     </div>
   )
 }

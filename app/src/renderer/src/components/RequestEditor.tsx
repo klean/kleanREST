@@ -11,6 +11,7 @@ import type {
   KeyValuePair,
   FormDataEntry
 } from '@shared/types/project'
+import { DEFAULT_PROJECT_SETTINGS } from '@shared/types/project'
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 
@@ -174,7 +175,7 @@ export default function RequestEditor(): JSX.Element {
       {/* Request config tabs */}
       <Tabs.Root defaultValue="params" className="flex flex-1 flex-col overflow-hidden">
         <Tabs.List className="flex shrink-0 border-b border-zinc-700 bg-zinc-800/30">
-          {['params', 'headers', 'body', 'auth'].map((tab) => (
+          {['params', 'headers', 'body', 'auth', 'settings'].map((tab) => (
             <Tabs.Trigger
               key={tab}
               value={tab}
@@ -231,8 +232,123 @@ export default function RequestEditor(): JSX.Element {
           <Tabs.Content value="auth" className="outline-none">
             <AuthEditor />
           </Tabs.Content>
+
+          {/* Settings */}
+          <Tabs.Content value="settings" className="outline-none">
+            <SettingsEditor />
+          </Tabs.Content>
         </div>
       </Tabs.Root>
+    </div>
+  )
+}
+
+function SettingsEditor(): JSX.Element {
+  const { activeRequest, updateActiveRequest } = useAppStore()
+  if (!activeRequest) return <div />
+
+  const s = activeRequest.settings
+  const validateSSL = s.validateSSL ?? DEFAULT_PROJECT_SETTINGS.validateSSL
+  const followRedirects = s.followRedirects ?? DEFAULT_PROJECT_SETTINGS.followRedirects
+  const maxRedirects = s.maxRedirects ?? DEFAULT_PROJECT_SETTINGS.maxRedirects
+  const timeout = s.timeout ?? DEFAULT_PROJECT_SETTINGS.timeout
+
+  const patch = (u: Partial<typeof s>): void => {
+    updateActiveRequest({ settings: { ...s, ...u } })
+  }
+
+  return (
+    <div className="space-y-4 p-1">
+      {/* SSL */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-medium text-zinc-200">SSL certificate validation</div>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            When off, connections proceed even if the server uses a self-signed or otherwise
+            untrusted certificate. Only turn off for development servers you control.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => patch({ validateSSL: !validateSSL })}
+          role="switch"
+          aria-checked={validateSSL}
+          className={`flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${
+            validateSSL ? 'bg-blue-600' : 'bg-zinc-700'
+          }`}
+        >
+          <span
+            className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
+              validateSSL ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="h-px bg-zinc-800" />
+
+      {/* Follow redirects */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-medium text-zinc-200">Follow redirects</div>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            Automatically follow 3xx responses up to the configured max.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => patch({ followRedirects: !followRedirects })}
+          role="switch"
+          aria-checked={followRedirects}
+          className={`flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${
+            followRedirects ? 'bg-blue-600' : 'bg-zinc-700'
+          }`}
+        >
+          <span
+            className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
+              followRedirects ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Max redirects */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="text-xs font-medium text-zinc-200">Max redirects</div>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            Upper bound on how many redirects will be followed. Clamped to 20 at execution.
+          </p>
+        </div>
+        <input
+          type="number"
+          min={0}
+          max={20}
+          value={maxRedirects}
+          onChange={(e) => patch({ maxRedirects: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+          disabled={!followRedirects}
+          className="w-20 shrink-0 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-600 disabled:opacity-50"
+        />
+      </div>
+
+      {/* Timeout */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="text-xs font-medium text-zinc-200">Timeout (ms)</div>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            How long to wait for the server to respond before giving up. Clamped to 5 minutes.
+          </p>
+        </div>
+        <input
+          type="number"
+          min={1}
+          max={300000}
+          step={1000}
+          value={timeout}
+          onChange={(e) => patch({ timeout: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+          className="w-24 shrink-0 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-600"
+        />
+      </div>
     </div>
   )
 }

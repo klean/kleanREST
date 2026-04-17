@@ -46,13 +46,19 @@ export const INVOKE_CHANNELS: { readonly [K in keyof IpcChannels]: true } = {
   'updater:check': true,
   'updater:download': true,
   'updater:install': true,
-  'updater:get-status': true
+  'updater:get-status': true,
+  'mcp:status': true,
+  'mcp:set-enabled': true,
+  'mcp:rotate-token': true,
+  'mcp:set-disabled-tools': true
 }
 
 export type InvokeChannel = keyof IpcChannels
 
 export const EVENT_CHANNELS = {
-  'updater:status': true
+  'updater:status': true,
+  'mcp:status-changed': true,
+  'mcp:request-executed': true
 } as const
 
 export type EventChannel = keyof typeof EVENT_CHANNELS

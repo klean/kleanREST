@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/lang-html": "^6.4.9",
     "@codemirror/lang-xml": "^6.1.0",

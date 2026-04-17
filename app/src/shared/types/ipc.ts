@@ -216,6 +216,52 @@ export interface IpcChannels {
     result: { success: boolean; output: string }
   }
 
+  // MCP
+  'mcp:status': {
+    params: void
+    result: {
+      enabled: boolean
+      running: boolean
+      url: string | null
+      token: string | null
+      disabledTools: string[]
+      error: string | null
+    }
+  }
+  'mcp:set-enabled': {
+    params: { enabled: boolean }
+    result: {
+      enabled: boolean
+      running: boolean
+      url: string | null
+      token: string | null
+      disabledTools: string[]
+      error: string | null
+    }
+  }
+  'mcp:rotate-token': {
+    params: void
+    result: {
+      enabled: boolean
+      running: boolean
+      url: string | null
+      token: string | null
+      disabledTools: string[]
+      error: string | null
+    }
+  }
+  'mcp:set-disabled-tools': {
+    params: { disabledTools: string[] }
+    result: {
+      enabled: boolean
+      running: boolean
+      url: string | null
+      token: string | null
+      disabledTools: string[]
+      error: string | null
+    }
+  }
+
   // Updater
   'updater:check': {
     params: void

@@ -23,6 +23,7 @@ import { importPostmanDump, readPostmanEnvironments, importPostmanCollection } f
 import { getWorkspaces, addWorkspace, removeWorkspace, createWorkspace, getLastActiveWorkspace, setLastActiveWorkspace } from '../config/app-config'
 import { isGitRepo, getBranchName, gitFetch, getAheadBehind, gitPull, gitStatus, gitCommit, gitPush } from '../git/git-operations'
 import { checkForUpdates, downloadUpdate, quitAndInstall, getLastUpdaterStatus } from '../updater/auto-updater'
+import { getMcpStatus, setMcpEnabled, rotateMcpToken, setMcpDisabledTools } from '../mcp/mcp-server'
 import { assertPathInWorkspace, assertIsRegisteredWorkspace } from '../security/path-guard'
 
 export function registerIpcHandlers(): void {
@@ -222,6 +223,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('updater:download', async () => downloadUpdate())
   ipcMain.handle('updater:install', async () => quitAndInstall())
   ipcMain.handle('updater:get-status', async () => getLastUpdaterStatus())
+
+  // ── MCP ──────────────────────────────────────────────────────────────
+
+  ipcMain.handle('mcp:status', async () => getMcpStatus())
+  ipcMain.handle('mcp:set-enabled', async (_event, params) => setMcpEnabled(params.enabled))
+  ipcMain.handle('mcp:rotate-token', async () => rotateMcpToken())
+  ipcMain.handle('mcp:set-disabled-tools', async (_event, params) =>
+    setMcpDisabledTools(params.disabledTools)
+  )
 
   // ── Git ──────────────────────────────────────────────────────────────
 

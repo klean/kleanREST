@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
 import { initAutoUpdater } from './updater/auto-updater'
+import { initMcp, shutdownMcp } from './mcp/mcp-server'
 
 // The PNG next to the build/ dir — used for the window icon (taskbar / Linux).
 // On Windows/macOS packaged builds the platform-specific icon from
@@ -66,6 +67,9 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   createWindow()
 
+  // Start the MCP server if it's enabled in saved settings. No-op otherwise.
+  void initMcp()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -75,4 +79,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  void shutdownMcp()
 })
