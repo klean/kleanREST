@@ -104,7 +104,33 @@ export async function gitCommit(
   message: string
 ): Promise<{ success: boolean; output: string }> {
   try {
-    await runGit(['add', '-A'], dirPath)
+    // Never stage kleanREST's internal dir — it holds the split-out secret
+    // store and request history. It's normally covered by the per-project
+    // .gitignore, but excluding it here means a missing or edited .gitignore
+    // can't lead to secrets being committed.
+    await runGit(
+      ['add', '-A', '--', '.', ':(exclude,glob)**/.kleanrest/**'],
+      dirPath
+    )
+
+    // Belt-and-suspenders for the case where a secret file was already tracked
+    // (staged before this guard existed): refuse to commit if any staged path
+    // lives under a .kleanrest/secrets directory.
+    const staged = await runGit(['diff', '--cached', '--name-only'], dirPath)
+    const leaked = staged
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && l.replace(/\\/g, '/').includes('.kleanrest/secrets/'))
+    if (leaked.length > 0) {
+      return {
+        success: false,
+        output:
+          'Refusing to commit: secret files are tracked by git:\n' +
+          leaked.join('\n') +
+          '\n\nRun `git rm --cached` on these files and ensure .kleanrest/ is gitignored.'
+      }
+    }
+
     const output = await runGit(['commit', '-m', message], dirPath, 60000)
     return { success: true, output }
   } catch (err) {

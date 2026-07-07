@@ -504,6 +504,12 @@ export async function createCollection(
 }
 
 export async function deleteCollection(collectionPath: string): Promise<void> {
+  // Recursive delete — only proceed if this actually looks like a collection,
+  // so a bad path can't be turned into an arbitrary recursive rm inside the
+  // workspace.
+  if (!(await exists(path.join(collectionPath, 'collection.json')))) {
+    throw new Error('Not a kleanREST collection directory')
+  }
   await fs.rm(collectionPath, { recursive: true, force: true })
 }
 

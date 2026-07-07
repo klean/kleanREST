@@ -29,6 +29,30 @@ const SENSITIVE_HEADER_NAMES = new Set([
 
 const REDACTED = '[REDACTED]'
 
+// Substrings that mark a query-param or JSON body field as credential-bearing.
+// Matched case-insensitively against the key name. Auth configured as an API
+// key in the query string (auth.addTo === 'query') lands in the resolved URL,
+// and login bodies routinely carry passwords/tokens — both end up in history
+// verbatim without this.
+const SENSITIVE_KEY_PATTERNS = [
+  'password',
+  'passwd',
+  'secret',
+  'token',
+  'apikey',
+  'api_key',
+  'api-key',
+  'auth',
+  'credential',
+  'sessionid',
+  'session_id'
+]
+
+function isSensitiveKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  return SENSITIVE_KEY_PATTERNS.some((p) => lower.includes(p))
+}
+
 function redactHeaders(
   headers: { key: string; value: string }[]
 ): { key: string; value: string }[] {
@@ -39,12 +63,63 @@ function redactHeaders(
   )
 }
 
+// Redact credential-bearing query-string values while leaving the rest of the
+// URL intact. Returns the input unchanged if it can't be parsed as a URL.
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    let changed = false
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (isSensitiveKey(key)) {
+        parsed.searchParams.set(key, REDACTED)
+        changed = true
+      }
+    }
+    return changed ? parsed.toString() : url
+  } catch {
+    return url
+  }
+}
+
+// Best-effort redaction of sensitive fields in a JSON request body. Non-JSON
+// bodies are left untouched — we don't want to mangle XML/form payloads or
+// over-redact free text.
+function redactBody(body: string | null): string | null {
+  if (!body) return body
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return body
+  }
+
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(walk)
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = isSensitiveKey(k) ? REDACTED : walk(v)
+      }
+      return out
+    }
+    return value
+  }
+
+  try {
+    return JSON.stringify(walk(parsed))
+  } catch {
+    return body
+  }
+}
+
 function redactEntry(entry: HistoryEntry): HistoryEntry {
   return {
     ...entry,
     request: {
       ...entry.request,
-      headers: redactHeaders(entry.request.headers)
+      url: redactUrl(entry.request.url),
+      headers: redactHeaders(entry.request.headers),
+      body: redactBody(entry.request.body)
     },
     response: entry.response
       ? { ...entry.response, headers: redactHeaders(entry.response.headers) }

@@ -43,6 +43,19 @@ export async function getWorkspaces(): Promise<WorkspaceEntry[]> {
 }
 
 export async function addWorkspace(workspacePath: string, name?: string): Promise<void> {
+  // Registering a workspace widens the set of paths every file operation is
+  // allowed to touch (the path-guard trusts registered workspace roots), so
+  // only accept a path that is actually an existing directory.
+  let stat: import('node:fs').Stats
+  try {
+    stat = await fs.stat(workspacePath)
+  } catch {
+    throw new Error(`Workspace path does not exist: ${workspacePath}`)
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`Workspace path is not a directory: ${workspacePath}`)
+  }
+
   const config = await loadAppConfig()
   if (config.workspaces.some(w => w.path === workspacePath)) return
   const workspaceName = name || path.basename(workspacePath)

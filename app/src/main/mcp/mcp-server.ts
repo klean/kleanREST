@@ -1,5 +1,6 @@
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { Server as HttpServer } from 'node:http'
+import { timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -663,13 +664,21 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+/** Constant-time string compare so token checks don't leak length/content via timing. */
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'utf-8')
+  const bBuf = Buffer.from(b, 'utf-8')
+  if (aBuf.length !== bBuf.length) return false
+  return timingSafeEqual(aBuf, bBuf)
+}
+
 function isAuthorized(req: IncomingMessage, token: string): boolean {
   const header = req.headers['authorization']
   if (!header || Array.isArray(header)) return false
   // Accept either "Bearer TOKEN" or "TOKEN"
   const parts = header.split(/\s+/)
   const provided = parts.length === 2 ? parts[1] : parts[0]
-  return provided === token
+  return safeEqual(provided, token)
 }
 
 async function handleMcpRequest(

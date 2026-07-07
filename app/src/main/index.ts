@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerIpcHandlers } from './ipc/handlers'
@@ -57,8 +57,41 @@ function createWindow(): void {
   }
 }
 
+// A strict Content-Security-Policy for the renderer. Only applied to packaged
+// builds — in dev, Vite serves the renderer over HTTP and needs inline scripts,
+// eval, and a websocket for HMR, which a strict policy would break. The
+// renderer never makes network requests directly (all HTTP goes through the
+// main process over IPC), so connect-src can stay locked to 'self'.
+function applyContentSecurityPolicy(): void {
+  if (is.dev) return
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    // Vite/Tailwind inject styles as inline <style> tags in the built output.
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'none'"
+  ].join('; ')
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp]
+      }
+    })
+  })
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.kleangroup.kleanrest')
+
+  applyContentSecurityPolicy()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

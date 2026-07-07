@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useAppStore } from '@renderer/stores/app-store'
+import ResponseBodyView from '@renderer/components/ResponseBodyView'
 import type { ErrorInsight } from '@shared/types/error-insight'
 
 function getStatusColor(status: number): string {
@@ -26,15 +27,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function tryPrettyPrintJson(body: string): { formatted: string; isJson: boolean } {
-  try {
-    const parsed = JSON.parse(body)
-    return { formatted: JSON.stringify(parsed, null, 2), isJson: true }
-  } catch {
-    return { formatted: body, isJson: false }
-  }
 }
 
 export default function ResponseViewer(): JSX.Element {
@@ -174,7 +166,11 @@ export default function ResponseViewer(): JSX.Element {
 
         <div className="flex-1 overflow-hidden">
           <Tabs.Content value="body" className="h-full outline-none">
-            <ResponseBody body={response.body} error={response.error} />
+            <ResponseBody
+              body={response.body}
+              error={response.error}
+              headers={response.headers}
+            />
           </Tabs.Content>
           <Tabs.Content value="headers" className="h-full outline-none">
             <ResponseHeaders headers={response.headers} />
@@ -187,13 +183,13 @@ export default function ResponseViewer(): JSX.Element {
 
 function ResponseBody({
   body,
-  error
+  error,
+  headers
 }: {
   body: string
   error?: string
+  headers: { key: string; value: string }[]
 }): JSX.Element {
-  const { formatted, isJson } = useMemo(() => tryPrettyPrintJson(body), [body])
-
   if (error) {
     return (
       <div className="h-full overflow-auto p-3">
@@ -204,17 +200,10 @@ function ResponseBody({
     )
   }
 
-  return (
-    <div className="h-full overflow-auto p-3">
-      <pre
-        className={`whitespace-pre-wrap break-all font-mono text-xs ${
-          isJson ? 'text-zinc-200' : 'text-zinc-300'
-        }`}
-      >
-        {formatted}
-      </pre>
-    </div>
-  )
+  const contentType =
+    headers.find((h) => h.key.toLowerCase() === 'content-type')?.value ?? ''
+
+  return <ResponseBodyView body={body} contentType={contentType} />
 }
 
 function ResponseHeaders({

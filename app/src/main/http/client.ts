@@ -39,6 +39,10 @@ function buildMultipartBody(
   return { body: Buffer.concat(parts), boundary }
 }
 
+// Cap the in-memory response body so a hostile or runaway endpoint can't OOM
+// the main process. 100 MB is well above any realistic API response.
+const MAX_RESPONSE_BYTES = 100 * 1024 * 1024
+
 function makeRequest(
   parsedUrl: URL,
   options: https.RequestOptions,
@@ -51,12 +55,29 @@ function makeRequest(
 
     const req = transport.request(parsedUrl, options, (res) => {
       const chunks: Buffer[] = []
+      let received = 0
+      let aborted = false
 
       res.on('data', (chunk: Buffer) => {
+        if (aborted) return
+        received += chunk.length
+        if (received > MAX_RESPONSE_BYTES) {
+          aborted = true
+          req.destroy(
+            Object.assign(
+              new Error(
+                `Response exceeded maximum size of ${MAX_RESPONSE_BYTES} bytes`
+              ),
+              { code: 'ERESPONSETOOLARGE' }
+            )
+          )
+          return
+        }
         chunks.push(chunk)
       })
 
       res.on('end', () => {
+        if (aborted) return
         const buffer = Buffer.concat(chunks)
         const body = buffer.toString('utf-8')
         const elapsed = Date.now() - startTime
@@ -93,6 +114,31 @@ function makeRequest(
 const MAX_REDIRECTS_LIMIT = 20
 const MAX_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const DEFAULT_TIMEOUT_MS = 30 * 1000
+
+// Headers that carry credentials. They must NOT be replayed when a redirect
+// crosses to a different origin (or downgrades https→http), or the user's
+// secrets leak to whatever host the Location header points at. Matches the
+// browser/curl behaviour of dropping auth on cross-origin redirects.
+const CREDENTIAL_HEADER_NAMES = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'www-authenticate'
+])
+
+/** Two URLs share an origin when scheme, host, and port all match. */
+function sameOrigin(a: URL, b: URL): boolean {
+  return a.protocol === b.protocol && a.host === b.host
+}
+
+function stripCredentialHeaders(headers: Record<string, string>): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (CREDENTIAL_HEADER_NAMES.has(key.toLowerCase())) continue
+    next[key] = value
+  }
+  return next
+}
 
 function clampPositive(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value) || value <= 0) return fallback
@@ -135,12 +181,17 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
       }
     }
 
+    // Method and headers can both change across a redirect chain (303 → GET,
+    // credential stripping on cross-origin hops), so track them mutably.
+    let currentMethod = params.method
+    let currentHeaders = headers
+
     while (true) {
       const parsedUrl = new URL(currentUrl)
 
       const options: https.RequestOptions = {
-        method: params.method,
-        headers,
+        method: currentMethod,
+        headers: currentHeaders,
         rejectUnauthorized: params.validateSSL
       }
 
@@ -184,15 +235,27 @@ export async function executeRequest(params: ExecuteRequestParams): Promise<Requ
 
         // Resolve relative redirects against current URL
         const location = result.headers.location
+        const previousUrl = parsedUrl
+        let nextUrl: URL
         try {
-          currentUrl = new URL(location, currentUrl).toString()
+          nextUrl = new URL(location, currentUrl)
+          currentUrl = nextUrl.toString()
         } catch {
           currentUrl = location
+          // Can't parse the target — treat as cross-origin and strip credentials
+          // to be safe rather than replay them blindly.
+          currentHeaders = stripCredentialHeaders(currentHeaders)
+          continue
         }
 
-        // On 303 or when method changes, convert to GET and drop body
+        // Drop credential-bearing headers when the redirect leaves the origin.
+        if (!sameOrigin(previousUrl, nextUrl)) {
+          currentHeaders = stripCredentialHeaders(currentHeaders)
+        }
+
+        // 303 See Other turns the follow-up into a GET with no body.
         if (result.status === 303) {
-          options.method = 'GET'
+          currentMethod = 'GET'
           requestBody = null
         }
 
